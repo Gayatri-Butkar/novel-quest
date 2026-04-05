@@ -650,6 +650,7 @@ export default function App() {
     prompt,
     systemPrompt = "You are a helpful scholarly assistant.",
     contextOverride = null,
+    modeOverride = null,
   ) => {
     setIsAiLoading(true);
     const botMsgId = Date.now();
@@ -679,7 +680,7 @@ export default function App() {
             contextOverride !== null
               ? contextOverride
               : pages[currentPage] || "",
-          mode: chatMode,
+          mode: modeOverride || chatMode,
         }),
       });
 
@@ -856,21 +857,63 @@ export default function App() {
     let p = "";
     let s = "You are a literary analyst scholar.";
 
-    // For image imports, use larger context (up to 8000 chars)
-    // For PDFs/regular docs, use current page only
-    const isShortDoc = pages.length === 1;
-    const context = isShortDoc ? text.substring(0, 8000) : null; // null = use current page
+    // Clamp page index to avoid stale/out-of-range indices after doc/page changes.
+    const safePageIndex =
+      pages.length > 0
+        ? Math.min(Math.max(currentPage, 0), pages.length - 1)
+        : 0;
 
-    if (type === "summary")
+    // For image imports, use larger context (up to 8000 chars)
+    // For PDFs/regular docs, default to current page only
+    const isShortDoc = pages.length === 1;
+    const context = isShortDoc ? text.substring(0, 8000) : pages[safePageIndex] || "";
+    const summaryWindowStart = Math.max(0, safePageIndex - 4);
+    const summaryWindowPages = isShortDoc
+      ? []
+      : pages
+          .slice(summaryWindowStart, safePageIndex + 1)
+          .map((pageText, idx) => ({
+            pageNumber: summaryWindowStart + idx + 1,
+            text: String(pageText || "").trim(),
+          }));
+    const nonEmptySummaryPages = summaryWindowPages.filter((p) => p.text.length > 0);
+    const effectiveSummaryPageNumber = isShortDoc
+      ? 1
+      : (
+          nonEmptySummaryPages[nonEmptySummaryPages.length - 1] || {
+            pageNumber: safePageIndex + 1,
+          }
+        ).pageNumber;
+    const summaryContext = isShortDoc
+      ? text.substring(0, 8000)
+      : [
+          `TARGET PAGE: ${safePageIndex + 1}`,
+          `BEST AVAILABLE PAGE TEXT FOR SUMMARY: Page ${effectiveSummaryPageNumber}`,
+          "",
+          "STORY CONTEXT WINDOW:",
+          nonEmptySummaryPages
+            .map((p) => `Page ${p.pageNumber}:\n${p.text}`)
+            .join("\n\n"),
+        ].join("\n");
+
+    if (type === "summary") {
+      s =
+        "You are an expert literary summarizer. Use simple English and focus on what the reader must remember from the current page, while keeping storyline continuity.";
       p = isShortDoc
-        ? "Summarize all the key content from this text concisely."
-        : "Summarize the key events on this page concisely.";
+        ? "Summarize this text in simple English with this exact format: Main Things to Remember (exactly 3 bullet points) and Characters Mentioned (name - short role, 1 line each). Each bullet must describe a different key event or idea from the text."
+        : `You are given storyline context from pages ${summaryWindowStart + 1} to ${safePageIndex + 1}. Summarize page ${safePageIndex + 1} in simple English with this exact format: Main Things to Remember (exactly 3 bullet points) and Characters Mentioned (name - short role, 1 line each). If the target page text is sparse, use the best available page text in the context window to preserve continuity and still provide useful takeaways. Never say "no text provided", "cannot summarize", or "page missing". Keep bullets concrete with names/actions/objects/places. If no character name appears, write "Characters Mentioned: None on this page".`;
+    }
     if (type === "characters")
       p = "Identify characters mentioned and their motivations.";
     if (type === "weaver")
       p = "Suggest 3 creative plot directions based on the current scene.";
 
-    const resultText = await callAi(p, s, context);
+    const resultText = await callAi(
+      p,
+      s,
+      type === "summary" ? summaryContext : context,
+      "strict",
+    );
     setInsightResult(resultText);
     trackEvent("insight_used", { insightType: type });
   };
