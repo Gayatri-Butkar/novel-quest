@@ -2,6 +2,9 @@
 
 Novel Quest is a React + Vite reading workspace for long-form manuscripts. It combines PDF ingestion, image OCR, AI chat, translation, reading insights, and Firebase-backed persistence so readers can upload material, ask questions about it, and organize their notes in one place.
 
+## View my project
+https://novel-quest-final.vercel.app/
+
 ## What It Does
 
 - Uploads PDFs and converts them to readable manuscript text.
